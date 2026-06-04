@@ -1,0 +1,140 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# -----------------
+# MATRICES DE PAULI
+# -----------------
+
+sigma_x = np.array([[0, 1], [1, 0]], dtype=complex)
+sigma_z = np.array([[1, 0], [0, -1]], dtype=complex)
+identidad = np.eye(2, dtype=complex)
+
+
+# ------------------
+# OPERADORES LOCALES
+# ------------------
+
+def operador_local(matriz, i, N):
+  matrices = []
+  for j in range(N):
+    matrices.append(matriz if j == i else identidad)
+
+  resultado = matrices[0]
+  for k in range(1, N):
+    resultado = np.kron(resultado, matrices[k])
+
+  return resultado
+
+
+# -------------
+# HAMILTONIANOS
+# -------------
+
+def construir_H0(N, gamma):
+  H0 = 0
+  for i in range(N):
+    H0 += operador_local(sigma_x, i, N)
+  return gamma * H0
+
+
+def construir_H1(N, J):
+  H1 = 0
+  for i in range(N):
+    for j in range(N):
+      H1 += J[i, j] * operador_local(sigma_z, i, N) @ operador_local(sigma_z, j, N)
+  return H1
+
+
+# -----------------------
+# MATRIZ DE ACOPLAMIENTOS
+# -----------------------
+
+def generar_J(N):
+  J = np.random.rand(N, N)
+  for i in range(N):
+    J[i, i] = 0
+  return (J + J.T) / 2
+
+
+# -----------------
+# CALCULAR ENTROPÍA
+# -----------------
+
+def entropia_entrelazamiento(psi, N):
+
+    dim = int(2**(N/2))
+    psi_matriz = psi.reshape(dim, dim)
+
+    rhoA = psi_matriz @ psi_matriz.conj().T
+
+    autovalores = np.linalg.eigvalsh(rhoA)
+    autovalores = autovalores[autovalores > 1e-12]
+
+    S = -np.sum(autovalores * np.log(autovalores))
+    return S
+
+
+# ----------
+# SIMULACIÓN
+# ----------
+
+def simulacion(gamma, paso, N):
+  J = generar_J(N)
+  lista_gamma = np.arange(-gamma, gamma, paso)
+  lista_S = []
+
+  for g in lista_gamma:
+    H0 = construir_H0(N, g)
+    H1 = construir_H1(N, J)
+    H = -H1 + H0
+
+    autovalores, autovectores = np.linalg.eigh(H)
+
+    psi = autovectores[:, 0]
+
+    S = entropia_entrelazamiento(psi, N)
+    lista_S.append(S)
+
+  return lista_S, lista_gamma
+
+# -----------
+# HISTOGRAMA
+# -----------
+
+def representar_entropia(lista_gamma, lista_S):
+
+  media = np.mean(lista_S)
+  desviacion_estandar = np.std(lista_S)
+
+  plt.plot(lista_gamma, lista_S, label="Datos")
+  plt.axhline(media, color='red', linestyle='--',
+            label=f'Media = {media:.4f}')
+  plt.axhline(media + 2 * desviacion_estandar, color='blue', linestyle='--',
+            label = f'Intervalo ± 2σ (σ = {desviacion_estandar:.4f})')
+  plt.axhline(media - 2 * desviacion_estandar, color='blue', linestyle='--')
+
+
+  plt.xlabel('Gamma')
+  plt.ylabel('Entropía')
+  plt.legend()
+  plt.show()
+
+
+# ----
+# MAIN
+# ----
+
+N = 8
+gamma = 10
+paso = 0.1
+lista_gamma = []
+
+for i in range(5):
+  lista_S, lista_gamma = simulacion(gamma, paso, N)
+  representar_entropia(lista_gamma, lista_S)
+
+  media = np.mean(lista_S)
+  desviacion_estandar = np.std(lista_S)
+
+  print(f'Media = {media:.4f}')
+  print(f'Desviación estándar = {desviacion_estandar:.4f}')
