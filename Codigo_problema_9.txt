@@ -1,0 +1,278 @@
+######################
+######################
+SIMULACIÓN DE LINDBLAD
+######################
+######################
+
+import numpy as np
+import math
+import matplotlib.pyplot as plt
+
+
+# -----------------
+# MATRICES DE PAULI
+# -----------------
+
+sigma_z = np.array([[1, 0], [0, -1]], dtype=complex)
+sigma_plus = np.array([[0, 0], [1, 0]], dtype=complex)
+sigma_minus = np.array([[0, 1], [0, 0]], dtype=complex)
+
+
+# ---------------
+# MATRIZ DENSIDAD
+# ---------------
+
+def matriz_densidad(psi):
+  return np.outer(psi, psi.conj())
+
+
+# ----------
+# CONMUTADOR
+# ----------
+
+def conmutador(A, B):
+  return A @ B - B @ A
+
+
+# --------------
+# ANTICONMUTADOR
+# --------------
+
+def anticonmutador(A, B):
+  return A @ B + B @ A
+
+# -------------
+# PASO LINDBLAD
+# -------------
+
+def paso_lindblad(rho, paso, GAMMA, gamma):
+  H = GAMMA * sigma_z
+  ev_interna = -1j * conmutador(H, rho)
+  ev_externa = sigma_minus @ rho @ sigma_plus - 1/2 * anticonmutador(sigma_plus @ sigma_minus, rho)
+
+  rho = rho + paso * (ev_interna + gamma * ev_externa)
+  rho = (rho + rho.conj().T) / 2
+  rho = rho / np.trace(rho)
+
+  return rho
+
+
+# ----------
+# SIMULACIÓN
+# ----------
+
+def simulacion(psi, paso, tiempo, GAMMA, gamma):
+  rho = matriz_densidad(psi)
+  lista_rho = [rho]
+
+  t = 0
+  while t < tiempo:
+    rho = paso_lindblad(rho, paso, GAMMA, gamma)
+    lista_rho.append(rho)
+    t += paso
+
+  return lista_rho
+
+
+# ----------------------------------------
+# REPRESENTAR COEFICIENTES MATRIZ DENSIDAD
+# ----------------------------------------
+
+def representar_rho(lista_rho, paso):
+  alpha = [rho[0,0] for rho in lista_rho]
+  beta = [rho[1,1] for rho in lista_rho]
+  delta = [rho[0,1] for rho in lista_rho]
+
+  tiempo_x = np.arange(len(lista_rho)) * paso
+
+  plt.plot(tiempo_x, alpha, label=r'$\rho_{00}$')
+  plt.plot(tiempo_x, beta, label=r'$\rho_{11}$')
+  plt.plot(tiempo_x, delta, label=r'$\rho_{01}$')
+
+  plt.title('Coeficientes de la matriz densidad')
+  plt.xlabel('Tiempo')
+  plt.ylabel('Valor del coeficiente')
+  plt.legend()
+  plt.show()
+
+
+# ----
+# MAIN
+# ----
+a = 1/3
+
+psi = np.array([a, math.sqrt(1-a**2)], dtype=complex)
+gamma = 0.05
+GAMMA = 1.5
+tiempo = 100
+paso = 0.01
+
+lista_rho = simulacion(psi, paso, tiempo, GAMMA, gamma)
+
+representar_rho(lista_rho, paso)
+
+
+
+#########################
+#########################
+SIMULACIÓN DE MONTE CARLO
+#########################
+#########################
+
+import numpy as np
+import math
+import matplotlib.pyplot as plt
+
+
+# -----------------
+# MATRICES DE PAULI
+# -----------------
+
+sigma_z = np.array([[1, 0], [0, -1]], dtype=complex)
+sigma_plus = np.array([[0, 0], [1, 0]], dtype=complex)
+sigma_minus = np.array([[0, 1], [0, 0]], dtype=complex)
+I = np.eye(2, dtype=complex)
+
+
+# ---------------
+# MATRIZ DENSIDAD
+# ---------------
+
+def matriz_densidad(psi):
+  return np.outer(psi, psi.conj())
+
+
+# ----------
+# CONMUTADOR
+# ----------
+
+def conmutador(A, B):
+  return A @ B - B @ A
+
+
+# --------------
+# ANTICONMUTADOR
+# --------------
+
+def anticonmutador(A, B):
+  return A @ B + B @ A
+
+
+# -----------------------
+# PROBABILIDAD MONTECARLO
+# -----------------------
+
+def probabilidad_monte_carlo(psi, paso, gamma):
+  operador = gamma * sigma_plus @ sigma_minus
+  return paso * np.conj(psi).T @ operador @ psi
+
+
+# ---------------
+# EVOLUCION PSI 0
+# ---------------
+
+def evolucion_psi_0(psi, GAMMA, gamma, prob, paso):
+  H = GAMMA * sigma_z
+  K = -0.5 * gamma * sigma_plus @ sigma_minus
+  H_eff = H + 1j * K
+  denominador = math.sqrt(1 - prob)
+  psi = (I - 1j * H_eff * paso) @ psi / denominador
+  norm_psi = np.linalg.norm(psi)
+  psi = psi / norm_psi
+  return psi
+
+
+# ---------------
+# EVOLUCIÓN PSI 1
+# ---------------
+
+def evolucion_psi_1(psi):
+  psi = sigma_minus @ psi
+  norm_psi = np.linalg.norm(psi)
+  psi = psi / norm_psi
+  return psi
+
+
+# -------------
+# PASO LINDBLAD
+# -------------
+
+def paso_monte_carlo(psi, paso, GAMMA, gamma):
+
+  epsilon = np.random.rand()
+  prob = probabilidad_monte_carlo(psi, paso, gamma)
+
+  if epsilon > prob:
+    psi = evolucion_psi_0(psi, GAMMA, gamma, prob, paso)
+  else:
+    psi = evolucion_psi_1(psi)
+
+  return psi
+
+
+# ----------
+# SIMULACIÓN
+# ----------
+
+def simulacion(psi, paso, tiempo, GAMMA, gamma, muestras):
+  lista_muestras = []
+
+  for n in range(muestras):
+    psi_local = psi.copy()
+    lista_psi = [psi_local]
+    t = 0
+
+    while t < tiempo:
+      psi_local = paso_monte_carlo(psi_local, paso, GAMMA, gamma)
+      lista_psi.append(psi_local)
+      t += paso
+
+    lista_muestras.append(lista_psi)
+
+  lista_rho = np.zeros((len(lista_psi), 2, 2), dtype=complex)
+
+  for muestra in lista_muestras:
+    for t, psi in enumerate(muestra):
+      lista_rho[t] += matriz_densidad(psi)
+
+  lista_rho /= len(lista_muestras)
+
+  return lista_rho
+
+
+# ----------------------------------------
+# REPRESENTAR COEFICIENTES MATRIZ DENSIDAD
+# ----------------------------------------
+
+def representar_rho(lista_rho, paso):
+  alpha = [rho[0,0] for rho in lista_rho]
+  beta = [rho[1,1] for rho in lista_rho]
+  delta = [rho[0,1] for rho in lista_rho]
+
+  tiempo_x = np.arange(len(lista_rho)) * paso
+
+  plt.plot(tiempo_x, alpha, label=r'$\rho_{00}$')
+  plt.plot(tiempo_x, beta, label=r'$\rho_{11}$')
+  plt.plot(tiempo_x, delta, label=r'$\rho_{01}$')
+
+  plt.title('Coeficientes de la matriz densidad')
+  plt.xlabel('Tiempo')
+  plt.ylabel('Valor del coeficiente')
+  plt.legend()
+  plt.show()
+
+
+# ----
+# MAIN
+# ----
+a = 1/3
+
+psi = np.array([a, math.sqrt(1-a**2)], dtype=complex)
+gamma = 0.05
+GAMMA = 1.5
+tiempo = 100
+paso = 0.01
+muestras = 50
+lista_rho = simulacion(psi, paso, tiempo, GAMMA, gamma, muestras)
+
+representar_rho(lista_rho, paso)
