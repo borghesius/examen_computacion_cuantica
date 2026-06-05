@@ -1,0 +1,314 @@
+import numpy as np
+from itertools import combinations
+import matplotlib.pyplot as plt
+from google.colab import drive
+from google.colab import files
+from scipy.linalg import sqrtm
+from scipy.optimize import nnls
+import math
+
+# Montar Google Drive
+drive.mount('/content/drive')
+
+ruta1 = '/content/drive/My Drive/wavefunction_1.txt'
+ruta2 = '/content/drive/My Drive/wavefunction_2.txt'
+
+# -------------------------
+# 1. Cargar estado cuantico
+# -------------------------
+def cargar_estado(nombre_archivo, N):
+    psi = np.zeros(2**N, dtype=complex)
+
+    with open(nombre_archivo, 'r') as f:
+        for linea in f:
+            if ':' not in linea:
+                continue
+
+            izquierda, derecha = linea.split(':')
+            indice_bin = izquierda.strip()
+
+            valores = derecha.strip().split()
+            parte_real = float(valores[0])
+
+            indice = int(indice_bin, 2)
+            psi[indice] = parte_real
+
+    # normalizar
+    psi = psi / np.linalg.norm(psi)
+
+    return psi
+
+# ------------------------------
+# 2. Entropía de entrelazamiento
+# ------------------------------
+def entropia_entrelazamiento(psi, N, bloque):
+    """
+    bloque: lista de qubits en el bloque A
+    """
+    dimensiones = [2]*N
+    psi_tensor = psi.reshape(dimensiones)
+
+    # Permutar indices
+    A = list(bloque)
+    B = [i for i in range(N) if i not in A]
+    perm = A + B
+
+    psi_perm = np.transpose(psi_tensor, perm)
+
+    dimA = 2**len(A)
+    dimB = 2**len(B)
+
+    psi_matriz = psi_perm.reshape(dimA, dimB)
+
+    # matriz reducida
+    rhoA = psi_matriz @ psi_matriz.conj().T
+
+    # autovalores
+    autovalores = np.linalg.eigvalsh(rhoA)
+    autovalores = autovalores[autovalores > 1e-12]
+
+    # entropía de Von Neumann
+    S = -np.sum(autovalores * np.log(autovalores))
+    return S
+
+# ---------------------
+# 3. Construir matriz A
+# ---------------------
+def construir_matriz_A(N):
+    subconjuntos = []
+    for i in range(2**N):
+        bits = [(i >> k) & 1 for k in range(N)]
+        subconjuntos.append(bits)
+
+    pares = list(combinations(range(N), 2))
+    A = np.zeros((2**N, len(pares)))
+
+    for l, x in enumerate(subconjuntos):
+        for p, (i, j) in enumerate(pares):
+            if (x[i], x[j]) in [(0,1), (1,0)]:
+                A[l, p] = 1
+
+    return A, pares
+
+# --------------------
+# 4. Calcular vector S
+# --------------------
+def calcular_S(psi, N):
+    S = np.zeros(2**N)
+
+    for l in range(2**N):
+        bloque = [i for i in range(N) if (l >> i) & 1]
+        if len(bloque) == 0 or len(bloque) == N:
+            S[l] = 0
+        else:
+            S[l] = entropia_entrelazamiento(psi, N, bloque)
+
+    return S
+
+# ----------------------
+# 5. Resolver ecuacion J
+# ----------------------
+def resolver_J(A, S):
+    ATA = A.T @ A
+    ATS = A.T @ S
+
+    # Resolver sistema lineal
+    #J = np.linalg.solve(ATA, ATS)
+    J, _ = nnls(ATA, ATS)
+    return J
+
+# ----------------------------------
+# 6. Convertir vector J a matriz NxN
+# ----------------------------------
+def J_a_matriz(J, pares, N):
+    M = np.zeros((N, N))
+
+    for valor, (i, j) in zip(J, pares):
+        M[i, j] = valor
+        M[j, i] = valor
+
+    return M
+
+# ----------------------
+# 7. Geometria emergente
+# ----------------------
+def geometria_emergente(J, pares, N):
+    J_max = math.log(2)
+    J_geometria = [(i/J_max)**-0.5 if i > 0 else -1 for i in J]
+    D = np.zeros((N, N))
+
+    for valor, (i, j) in zip(J_geometria, pares):
+        D[i, j] = valor
+        D[j, i] = valor
+
+    return D
+
+# ----
+# MAIN
+# ----
+N = 8
+
+psi = cargar_estado(ruta1, N)
+
+A, pares = construir_matriz_A(N)
+S = calcular_S(psi, N)
+
+J = resolver_J(A, S)
+
+matriz_enlaces = J_a_matriz(J, pares, N)
+
+geometria = geometria_emergente(J, pares, N)
+
+print("Vector J:")
+print(J)
+
+print("\nMatriz de enlaces de entrelazamiento:")
+print(matriz_enlaces)
+
+print("\nGeometria emergente:")
+print(geometria)
+
+
+
+
+# -------------
+# Error entropía
+# -------------
+S_error = A @ J
+filtro = S != 0
+
+error_individual = np.abs(S - S_error)
+error_medio = np.mean(error_individual)
+
+error_relativo = np.zeros_like(S)
+
+np.divide(
+    np.abs(S - S_error),
+    S,
+    out=error_relativo,
+    where=filtro
+)
+error_relativo_medio = np.mean(error_relativo[filtro])
+
+print("\nError entropía:")
+print(error_medio)
+
+print("\nError relativo entropía:")
+print(error_relativo_medio)
+
+# -----------------------------
+# Error por número de fronteras
+# -----------------------------
+num_fronteras = np.zeros(2**N)
+
+for j in range(2**N):
+  for i in range(len(pares)):
+    if A[j, i] == 1:
+      if J[i] > 1e-2:
+        num_fronteras[j] += 1
+
+errores_acumulados = {}
+errores_relativos_acumulados = {}
+conteo = {}
+conteo2 = {}
+
+for i in range(len(S)):
+    k = int(num_fronteras[i])
+
+    if k not in errores_acumulados:
+        errores_acumulados[k] = 0
+        errores_relativos_acumulados[k] = 0
+        conteo[k] = 0
+        conteo2[k] = 0
+
+    errores_acumulados[k] += error_individual[i]
+    conteo[k] += 1
+
+    if filtro[i]:
+      errores_relativos_acumulados[k] += error_relativo[i]
+      conteo2[k] += 1
+
+error_medio = {}
+error_relativo_medio = {}
+for k in errores_acumulados:
+    if conteo[k] > 0:
+        error_medio[k] = errores_acumulados[k] / conteo[k]
+    else:
+        error_medio[k] = 0
+
+    if conteo2[k] > 0:
+        error_relativo_medio[k] = errores_relativos_acumulados[k] / conteo2[k]
+    else:
+        error_relativo_medio[k] = 0
+
+print("\nErrores medios por número de fronteras:")
+print(error_medio)
+
+print("\nErrores relativos medios por número de fronteras:")
+print(error_relativo_medio)
+
+# ---------------------------
+# Error según tamaño sampling
+# ---------------------------
+
+# ---------------------
+# 3. Construir matriz A
+# ---------------------
+def construir_matriz_A(N, muestra):
+    subconjuntos = []
+    for i in muestra:
+        bits = [(i >> k) & 1 for k in range(N)]
+        subconjuntos.append(bits)
+
+    pares = list(combinations(range(N), 2))
+    A_muestra = np.zeros((len(muestra), len(pares)))
+
+    for l, x in enumerate(subconjuntos):
+        for p, (i, j) in enumerate(pares):
+            if (x[i], x[j]) in [(0,1), (1,0)]:
+                A_muestra[l, p] = 1
+
+    return A_muestra, pares
+
+# --------------------
+# 4. Calcular vector S
+# --------------------
+def calcular_S(psi, N, muestra):
+    S_muestra = np.zeros(len(muestra))
+
+    for idx, l in enumerate(muestra):
+        bloque = [i for i in range(N) if (l >> i) & 1]
+        if len(bloque) == 0 or len(bloque) == N:
+            S_muestra[idx] = 0
+        else:
+            S_muestra[idx] = entropia_entrelazamiento(psi, N, bloque)
+
+    return S_muestra
+
+# ----
+# MAIN
+# ----
+repeticiones = 8
+num_muestra = [10, 15, 20, 25, 30, 40, 45, 50, 75, 100, 150, 200, 256]
+lista_error = np.zeros(len(num_muestra))
+
+for k in range(repeticiones):
+  lista_error_provisional = []
+  for i in num_muestra:
+    muestra = np.random.choice(2**N, size=i, replace=False)
+
+    A_muestra, pares_muestra = construir_matriz_A(N, muestra)
+    S_muestra = calcular_S(psi, N, muestra)
+    J_muestra = resolver_J(A_muestra, S_muestra)
+    S_error_muestra = A @ J_muestra
+
+    error_muestra = np.mean(np.abs(S - S_error_muestra))
+
+    lista_error_provisional.append(error_muestra)
+
+  lista_error += np.array(lista_error_provisional)
+
+lista_error_media = lista_error / repeticiones
+
+print(f"\nError según el tamaño de la muestra:")
+print(lista_error_media)
